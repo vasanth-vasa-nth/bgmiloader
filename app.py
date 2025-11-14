@@ -15,7 +15,7 @@ VALID_KEYS = {
         "days": 30,
         "duration": "30 Days"
     },
-    "KEY-USER-001": {
+    "TopTen-admintest": {
         "days": 365,
         "duration": "1 Year"
     },
@@ -26,7 +26,29 @@ VALID_KEYS = {
     "vasanthtest": {
         "days": 365,
         "duration": "1 Year"
-    }
+    },
+     "TOPTEN-QWERTYUAS": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-PLMKNIODC": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-XVBRTEWQZ": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-ASDFGHJKL": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-ZXCASDQWE": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-MNBVCXZPO": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-HGFDSEQWA": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-JKIUYTREW": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-QAZXSWEDC": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-WXEDCFRVT": {"days": 30, "duration": "30 Days"},
+
+    "TOPTEN-RTYUIOPLK": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-BVCXZLKJH": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-POIUYTREW": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-ZMLPOIUYT": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-REWQASDFG": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-HGFDSAZXC": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-TGBNHYUJM": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-PLMOKNIJB": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-WSXEDCRFV": {"days": 30, "duration": "30 Days"},
+    "TOPTEN-UJMNHYGTB": {"days": 30, "duration": "30 Days"}
+}
 }
 
 # Dictionary to store key data
@@ -578,5 +600,6 @@ def remove_key():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000, debug=False)
+
 
 
