@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import hashlib
+/*import hashlib
 import base64
 import json
 import time
@@ -99,3 +99,4 @@ if __name__ == "__main__":
     # To test locally, you would run this script and then use a tool like curl
     # Example: curl -X POST -H "Content-Type: text/plain" --data "game=PUBGNR&user_key=test&serial=123" http://127.0.0.1:5000
     app.run(host='0.0.0.0', port=5000, debug=True)
+*/
