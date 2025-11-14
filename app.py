@@ -49,8 +49,6 @@ VALID_KEYS = {
     "TOPTEN-WSXEDCRFV": {"days": 30, "duration": "30 Days"},
     "TOPTEN-UJMNHYGTB": {"days": 30, "duration": "30 Days"}
 }
-}
-
 # Dictionary to store key data
 KEY_DATA = {}
 
@@ -600,6 +598,7 @@ def remove_key():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000, debug=False)
+
 
 
 
