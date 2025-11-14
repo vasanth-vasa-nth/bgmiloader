@@ -1,9 +1,24 @@
+#!/usr/bin/env python3
 import json
 import os
-from flask import Flask, request, jsonify
 import secrets
+import hashlib
+import base64
+import time
 from datetime import datetime, timedelta
 from functools import wraps
+from flask import Flask, request, jsonify, Response
+from Crypto.Cipher import AES
+from Crypto.Util.Padding import pad
+
+# --- AES Configuration (Must match the client) ---
+KEY = b"KPBXFY9Q6WUJ8345"
+IV = b"1FPR3J5MLDCWAVTE"
+
+def compute_token(user_key: str, serial: str, game: str = "PUBGNR", suffix: str = "FractionLoader123") -> str:
+    """Calculates the MD5 hash of a formatted string."""
+    final_string = f"{game}-{user_key}-{serial}-{suffix}"
+    return hashlib.md5(final_string.encode('utf-8')).hexdigest()
 
 # --- Configuration & Constants ---
 # Admin password for creating keys (set via environment variable for security)
@@ -49,6 +64,8 @@ VALID_KEYS = {
     "TOPTEN-WSXEDCRFV": {"days": 30, "duration": "30 Days"},
     "TOPTEN-UJMNHYGTB": {"days": 30, "duration": "30 Days"}
 }
+# NOTE: The extra '}' syntax error from before has been fixed here.
+
 # Dictionary to store key data
 KEY_DATA = {}
 
@@ -70,6 +87,39 @@ VALID_KEYS_FILE = '/tmp/valid_keys.json'
 # --------------------------------
 
 app = Flask(__name__)
+
+# --- Response Helper Functions ---
+
+def create_encrypted_response(data_dict):
+    """Encrypts a dictionary and returns a plain text Flask Response."""
+    try:
+        json_string = json.dumps(data_dict)
+        inner_base64 = base64.b64encode(json_string.encode('utf-8'))
+        cipher = AES.new(KEY, AES.MODE_CBC, IV)
+        padded_data = pad(inner_base64, AES.block_size)
+        encrypted_bytes = cipher.encrypt(padded_data)
+        final_output = base64.b64encode(encrypted_bytes).decode('utf-8')
+        return Response(final_output, status=200, mimetype='text/plain')
+    except Exception as e:
+        app.logger.error(f"Error during encryption: {e}")
+        # Fallback for encryption error
+        return Response("Server Encryption Error", status=500, mimetype='text/plain')
+
+def create_error_response(reason_str):
+    """Creates the standard encrypted error response."""
+    response_data = {
+        "status": False,
+        "data": {
+            "modname": "MOD NAME",
+            "mod_status": reason_str,
+            "credit": "FLOATING TEXT",
+            "token": "0",
+            "device": "0",
+            "EXP": "1970-01-01 00:00:00",
+            "rng": int(time.time())
+        }
+    }
+    return create_encrypted_response(response_data)
 
 # --- Persistence Functions (for Render) ---
 def load_data():
@@ -175,9 +225,9 @@ def home():
     """Home page with API documentation"""
     return jsonify({
         "message": "Key Management API",
-        "version": "2.0",
+        "version": "2.0 (AES Encrypted)",
         "endpoints": {
-            "authentication": "/api?user_key=KEY&serial=SERIAL",
+            "authentication": "/api (POST or GET with user_key & serial)",
             "admin": {
                 "create_key": "/admin/create_key (POST with password)",
                 "stats": "/admin/stats (GET with password)",
@@ -189,52 +239,29 @@ def home():
         }
     })
 
+# --- THIS IS THE MODIFIED ENDPOINT ---
 @app.route('/api', methods=['GET', 'POST'])
 def handle_api_request():
     
-    # Get parameters from request
-    game = request.args.get('game') or request.form.get('game')
+    # Get parameters from request (works with GET query or POST form)
+    game = request.args.get('game') or request.form.get('game') or "PUBGNR" # Added default
     user_key = request.args.get('user_key') or request.form.get('user_key')
     serial = request.args.get('serial') or request.form.get('serial')
     
     # Check if all required parameters are present
     if not user_key:
-        error_response = {
-            "status": 0,
-            "token": None,
-            "expire": 0,
-            "reason": "'user_key' parameter not found."
-        }
-        return jsonify(error_response), 400
+        return create_error_response("'user_key' parameter not found.")
     
     if not serial:
-        error_response = {
-            "status": 0,
-            "token": None,
-            "expire": 0,
-            "reason": "'serial' parameter not found."
-        }
-        return jsonify(error_response), 400
+        return create_error_response("'serial' parameter not found.")
     
     # Check if key is blocked
     if user_key in BLOCKED_KEYS:
-        response_data = {
-            "status": 0,
-            "token": None,
-            "expire": 0,
-            "reason": f"Login failed: Key is blocked."
-        }
-        return jsonify(response_data), 403
+        return create_error_response("Login failed: Key is blocked.")
     
     # Check if key is valid
     if user_key not in VALID_KEYS:
-        response_data = {
-            "status": 0,
-            "token": None,
-            "expire": 0,
-            "reason": f"Login failed: Invalid key."
-        }
-        return jsonify(response_data), 401
+        return create_error_response("Login failed: Invalid key.")
     
     # Check serial number validation
     if user_key in KEY_DATA:
@@ -250,34 +277,17 @@ def handle_api_request():
                 "blocked_time": datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
                 "reason": "Login attempt from different device"
             }
-            
-            # Save data
             save_data()
-            
-            # Update statistics
             update_statistics()
-            
-            response_data = {
-                "status": 0,
-                "token": None,
-                "expire": 0,
-                "reason": "Login failed: Key blocked due to suspicious activity."
-            }
-            return jsonify(response_data), 403
+            return create_error_response("Login failed: Key blocked due to suspicious activity.")
         else:
             # Check if key has expired
             current_time = datetime.now()
             expire_time = datetime.fromtimestamp(stored_data['expire_timestamp'])
             
             if current_time > expire_time:
-                response_data = {
-                    "status": 0,
-                    "token": None,
-                    "expire": stored_data['expire_timestamp'],
-                    "reason": f"Login failed: Key has expired."
-                }
                 update_statistics()
-                return jsonify(response_data), 403
+                return create_error_response("Login failed: Key has expired.")
     else:
         # First time login - register the key
         current_time = datetime.now()
@@ -290,144 +300,113 @@ def handle_api_request():
             'first_login': current_time,
             'expire_timestamp': expire_timestamp
         }
-        
-        # Save data
         save_data()
     
-    # Login successful
-    token = secrets.token_hex(16)
-    exp_timestamp = KEY_DATA[user_key]['expire_timestamp']
+    # --- Login successful - Build the new encrypted response ---
     
+    # 1. Get the real expiration date and format it
+    exp_timestamp = KEY_DATA[user_key]['expire_timestamp']
+    expire_time_obj = datetime.fromtimestamp(exp_timestamp)
+    exp_string = expire_time_obj.strftime('%Y-%m-%d %H:%M:%S')
+
+    # 2. Calculate the MD5 token
+    new_token = compute_token(user_key, serial, game)
+
+    # 3. Get current timestamp for 'rng'
+    current_timestamp = int(time.time())
+
+    # 4. Construct the JSON data payload
     response_data = {
-        "status": 1,
-        "token": token,
-        "expire": exp_timestamp,
-        "reason": "Authentication successful"
+        "status": True,
+        "data": {
+            "modname": "MOD NAME",
+            "mod_status": "MOD STATUS - SAFE",
+            "credit": "FLOATING TEXT",
+            "token": new_token,
+            "device": "10000",
+            "EXP": exp_string,  # Use the real expiration string
+            "rng": current_timestamp
+        }
     }
     
     # Update statistics
     update_statistics()
     
-    return jsonify(response_data)
+    # 5. Encrypt and return the response
+    return create_encrypted_response(response_data)
+
+
+# --- ADMIN ENDPOINTS (Unchanged) ---
 
 @app.route('/admin/create_key', methods=['POST'])
 @require_admin_password
 def create_key():
     """Create a new key with specified duration"""
     
-    # Get parameters
     key_name = (
         request.args.get('key_name') or 
         request.form.get('key_name') or
         (request.json.get('key_name') if request.is_json else None)
     )
-    
     days = (
         request.args.get('days') or 
         request.form.get('days') or
         (request.json.get('days') if request.is_json else None)
     )
     
-    # Validate inputs
     if not key_name:
-        return jsonify({ "status": 0,
-            "message": "key_name parameter required"
-        }), 400
-    
+        return jsonify({ "status": 0, "message": "key_name parameter required" }), 400
     if not days:
-        return jsonify({
-            "status": 0,
-            "message": "days parameter required"
-        }), 400
+        return jsonify({ "status": 0, "message": "days parameter required" }), 400
     
     try:
         days = int(days)
-        if days <= 0:
-            raise ValueError("Days must be positive")
+        if days <= 0: raise ValueError("Days must be positive")
     except ValueError:
-        return jsonify({
-            "status": 0,
-            "message": "days must be a positive integer"
-        }), 400
+        return jsonify({ "status": 0, "message": "days must be a positive integer" }), 400
     
-    # Check if key already exists
     if key_name in VALID_KEYS:
-        return jsonify({
-            "status": 0,
-            "message": f"Key '{key_name}' already exists"
-        }), 409
+        return jsonify({ "status": 0, "message": f"Key '{key_name}' already exists" }), 409
     
-    # Determine duration string
-    if days == 1:
-        duration = "1 Day"
-    elif days == 7:
-        duration = "7 Days"
-    elif days == 30:
-        duration = "30 Days"
-    elif days == 365:
-        duration = "1 Year"
-    else:
-        duration = f"{days} Days"
+    if days == 1: duration = "1 Day"
+    elif days == 7: duration = "7 Days"
+    elif days == 30: duration = "30 Days"
+    elif days == 365: duration = "1 Year"
+    else: duration = f"{days} Days"
     
-    # Create the key
-    VALID_KEYS[key_name] = {
-        "days": days,
-        "duration": duration
-    }
-    
-    # Save data
+    VALID_KEYS[key_name] = { "days": days, "duration": duration }
     save_data()
     
     return jsonify({
         "status": 1,
         "message": f"Key '{key_name}' created successfully",
-        "key_details": {
-            "key_name": key_name,
-            "duration": duration,
-            "days": days
-        }
+        "key_details": { "key_name": key_name, "duration": duration, "days": days }
     })
 
 @app.route('/admin/delete_key', methods=['POST'])
 @require_admin_password
 def delete_key():
     """Delete a key from VALID_KEYS (removes it from system entirely)"""
-    
     key_name = (
         request.args.get('key_name') or 
         request.form.get('key_name') or
         (request.json.get('key_name') if request.is_json else None)
     )
-    
     if not key_name:
-        return jsonify({
-            "status": 0,
-            "message": "key_name parameter required"
-        }), 400
-    
+        return jsonify({ "status": 0, "message": "key_name parameter required" }), 400
     if key_name not in VALID_KEYS:
-        return jsonify({
-            "status": 0,
-            "message": f"Key '{key_name}' not found in valid keys"
-        }), 404
+        return jsonify({ "status": 0, "message": f"Key '{key_name}' not found" }), 404
     
-    # Remove from all dictionaries
     key_info = VALID_KEYS.pop(key_name)
-    
     removed_from = ["valid_keys"]
-    
     if key_name in KEY_DATA:
         KEY_DATA.pop(key_name)
         removed_from.append("active_data")
-    
     if key_name in BLOCKED_KEYS:
         BLOCKED_KEYS.pop(key_name)
         removed_from.append("blocked_list")
     
-    # Save data
     save_data()
-    
-    # Update statistics
     update_statistics()
     
     return jsonify({
@@ -443,15 +422,11 @@ def get_statistics():
     """Endpoint to view current statistics"""
     update_statistics()
     
-    # Build detailed response
-    active_keys = []
-    expired_keys = []
+    active_keys, expired_keys, blocked_list, valid_keys_list = [], [], [], []
     current_time = datetime.now()
     
     for key, data in KEY_DATA.items():
-        if key in BLOCKED_KEYS:
-            continue
-        
+        if key in BLOCKED_KEYS: continue
         expire_time = datetime.fromtimestamp(data['expire_timestamp'])
         key_info = {
             "key": key,
@@ -460,13 +435,9 @@ def get_statistics():
             "expires": expire_time.strftime('%Y-%m-%d %H:%M:%S'),
             "days_remaining": (expire_time - current_time).days if current_time < expire_time else 0
         }
-        
-        if current_time < expire_time:
-            active_keys.append(key_info)
-        else:
-            expired_keys.append(key_info)
+        if current_time < expire_time: active_keys.append(key_info)
+        else: expired_keys.append(key_info)
     
-    blocked_list = []
     for key, block_info in BLOCKED_KEYS.items():
         blocked_list.append({
             "key": key,
@@ -476,14 +447,8 @@ def get_statistics():
             "reason": block_info['reason']
         })
     
-    # List all valid keys
-    valid_keys_list = []
     for key, info in VALID_KEYS.items():
-        valid_keys_list.append({
-            "key_name": key,
-            "duration": info['duration'],
-            "days": info['days']
-        })
+        valid_keys_list.append({ "key_name": key, "duration": info['duration'], "days": info['days'] })
     
     return jsonify({
         "statistics": STATS,
@@ -508,10 +473,7 @@ def get_blocked_keys():
             "reason": block_info['reason']
         })
     
-    return jsonify({
-        "total_blocked": len(BLOCKED_KEYS),
-        "blocked_keys": blocked_list
-    })
+    return jsonify({ "total_blocked": len(BLOCKED_KEYS), "blocked_keys": blocked_list })
 
 @app.route('/admin/unblock', methods=['POST'])
 @require_admin_password
@@ -522,26 +484,13 @@ def unblock_key():
         request.form.get('user_key') or
         (request.json.get('user_key') if request.is_json else None)
     )
-    
     if not user_key:
-        return jsonify({
-            "status": 0,
-            "message": "user_key parameter required"
-        }), 400
-    
+        return jsonify({ "status": 0, "message": "user_key parameter required" }), 400
     if user_key not in BLOCKED_KEYS:
-        return jsonify({
-            "status": 0,
-            "message": f"Key '{user_key}' is not blocked"
-        }), 404
+        return jsonify({ "status": 0, "message": f"Key '{user_key}' is not blocked" }), 404
     
-    # Remove from blocked list
     block_info = BLOCKED_KEYS.pop(user_key)
-    
-    # Save data
     save_data()
-    
-    # Update statistics
     update_statistics()
     
     return jsonify({
@@ -559,46 +508,28 @@ def remove_key():
         request.form.get('user_key') or
         (request.json.get('user_key') if request.is_json else None)
     )
-    
     if not user_key:
-        return jsonify({
-            "status": 0,
-            "message": "user_key parameter required"
-        }), 400
+        return jsonify({ "status": 0, "message": "user_key parameter required" }), 400
     
     removed_from = []
-    
-    # Remove from KEY_DATA
     if user_key in KEY_DATA:
         KEY_DATA.pop(user_key)
         removed_from.append("active_data")
-    
-    # Remove from BLOCKED_KEYS
     if user_key in BLOCKED_KEYS:
         BLOCKED_KEYS.pop(user_key)
         removed_from.append("blocked_list")
     
     if not removed_from:
-        return jsonify({
-            "status": 0,
-            "message": f"Key '{user_key}' not found in active data or blocked list"
-        }), 404
+        return jsonify({ "status": 0, "message": f"Key '{user_key}' not found" }), 404
     
-    # Save data
     save_data()
-    
-    # Update statistics
     update_statistics()
     
     return jsonify({
         "status": 1,
-        "message": f"Key '{user_key}' removed successfully (still exists in valid keys)",
+        "message": f"Key '{user_key}' removed (still in valid keys)",
         "removed_from": removed_from
     })
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=10000, debug=False)
-
-
-
-
